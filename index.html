@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Form Overlay Editor</title>
+    
+    <!-- PDF Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #1e293b;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --handle-color: #f59e0b;
+            --selected-color: #ec4899; /* Pink for selection */
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            color: #333;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 320px;
+            background: var(--surface);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.2);
+            z-index: 20;
+            overflow-y: auto;
+        }
+
+        .logo {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #0f172a;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .section-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            font-weight: 700;
+            margin-top: 10px;
+        }
+
+        .tool-btn {
+            padding: 10px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: left;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .tool-btn:hover {
+            background: #f8fafc;
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .btn-primary:hover { background: #1d4ed8; }
+
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            padding: 8px;
+            text-align: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* Workspace */
+        .workspace {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            padding: 40px;
+            background: #333;
+        }
+
+        #pdf-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            background: white;
+            transform-origin: top center;
+        }
+
+        #bg-canvas {
+            display: block;
+            pointer-events: none;
+        }
+
+        /* Draggable Fields */
+        .draggable-field {
+            position: absolute;
+            background: rgba(37, 99, 235, 0.1);
+            border: 2px solid var(--primary);
+            border-radius: 3px;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: var(--primary);
+            font-weight: bold;
+            box-sizing: border-box;
+            user-select: none;
+            transition: border-color 0.1s;
+        }
+
+        /* Selected State */
+        .draggable-field.selected {
+            border-color: var(--selected-color);
+            background: rgba(236, 72, 153, 0.15);
+            color: var(--selected-color);
+            z-index: 10;
+        }
+
+        .draggable-field:active {
+            cursor: grabbing;
+        }
+
+        /* Tab Order Badge */
+        .tab-badge {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            font-size: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .draggable-field.selected .tab-badge {
+            background: var(--selected-color);
+        }
+
+        /* Resize Handle */
+        .resize-handle {
+            position: absolute;
+            right: -5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 8px;
+            height: 16px;
+            background: var(--handle-color);
+            border-radius: 2px;
+            cursor: e-resize;
+            z-index: 10;
+        }
+
+        .delete-btn {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 16px;
+            height: 16px;
+            background: #ef4444;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 10px;
+            display: none;
+            z-index: 11;
+        }
+
+        .draggable-field:hover .delete-btn { display: flex; }
+        
+        .empty-msg {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            text-align: center;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo">PDF Form Editor</div>
+        
+        <div class="section-title">1. Setup</div>
+        <label class="tool-btn" style="background: #0f172a; color: white; justify-content: center;">
+            📂 Upload PDF
+            <input type="file" id="pdf-upload" accept="application/pdf" style="display: none" onchange="handleUpload(event)">
+        </label>
+        
+        <label style="font-size: 0.85rem; color: #64748b;">Output Filename</label>
+        <input type="text" id="filename" value="filled_form" placeholder="Filename">
+
+        <div class="section-title">2. Add Fields</div>
+        <div class="btn-group">
+            <button class="tool-btn" onclick="addField('text')">🔤 Text</button>
+            <button class="tool-btn" onclick="addField('checkbox')">☑️ Check</button>
+        </div>
+
+        <div class="section-title">3. Organization</div>
+        <button class="tool-btn" onclick="autoOrderFields()">
+            🔢 Auto-Order (Tabs)
+        </button>
+        <p style="font-size: 0.75rem; color: #64748b; margin: 0;">
+            Reorders tab sequence Top → Bottom.
+        </p>
+
+        <div class="section-title">4. Alignment</div>
+        <p style="font-size: 0.75rem; color: #64748b; margin: 0;">
+            Shift+Click to select multiple.
+        </p>
+        <div class="btn-group">
+            <button class="tool-btn icon-btn" title="Align Left" onclick="alignFields('left')">⇤</button>
+            <button class="tool-btn icon-btn" title="Align Center Vertical" onclick="alignFields('centerV')">⇹</button>
+            <button class="tool-btn icon-btn" title="Align Top" onclick="alignFields('top')">⤒</button>
+            <button class="tool-btn icon-btn" title="Same Width" onclick="alignFields('width')">↔</button>
+        </div>
+
+        <div style="flex:1"></div>
+        <button class="btn-primary" onclick="downloadPDF()">Download PDF</button>
+    </div>
+
+    <div class="workspace" id="workspace" onmousedown="handleBgClick(event)">
+        <div class="empty-msg" id="empty-msg">Upload a PDF to start editing</div>
+        <div id="pdf-container">
+            <canvas id="bg-canvas"></canvas>
+            <div id="overlay-layer"></div>
+        </div>
+    </div>
+
+    <script>
+        let pdfDoc = null;
+        let scale = 1.5; 
+        let originalPageWidth = 0;
+        let originalPageHeight = 0;
+        
+        // State
+        let fields = [];
+        let selectedFieldIds = new Set();
+        
+        // DOM Elements
+        const container = document.getElementById('pdf-container');
+        const overlay = document.getElementById('overlay-layer');
+        const canvas = document.getElementById('bg-canvas');
+        const ctx = canvas.getContext('2d');
+        const emptyMsg = document.getElementById('empty-msg');
+
+        // --- Upload & Render ---
+
+        async function handleUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const fileReader = new FileReader();
+            fileReader.onload = async function() {
+                const typedarray = new Uint8Array(this.result);
+                try {
+                    pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
+                    renderPage(1);
+                    emptyMsg.style.display = 'none';
+                    // Reset fields on new upload
+                    fields = [];
+                    selectedFieldIds.clear();
+                    renderOverlay();
+                } catch (err) {
+                    alert("Error loading PDF: " + err.message);
+                }
+            };
+            fileReader.readAsArrayBuffer(file);
+        }
+
+        async function renderPage(num) {
+            const page = await pdfDoc.getPage(num);
+            const originalViewport = page.getViewport({ scale: 1.0 });
+            originalPageWidth = originalViewport.width;
+            originalPageHeight = originalViewport.height;
+
+            const viewport = page.getViewport({ scale: scale });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            container.style.width = `${viewport.width}px`;
+            container.style.height = `${viewport.height}px`;
+
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        }
+
+        // --- Field Logic ---
+
+        function addField(type) {
+            if (!pdfDoc) return alert("Please upload a PDF first.");
+
+            const id = Date.now();
+            const field = {
+                id: id,
+                type: type,
+                x: 50,
+                y: 50 + (fields.length * 10), // slight stagger
+                width: type === 'checkbox' ? 20 : 150,
+                height: type === 'checkbox' ? 20 : 24,
+                label: type === 'text' ? 'Text' : 'Chk'
+            };
+
+            fields.push(field);
+            // Select the new field immediately
+            selectedFieldIds.clear();
+            selectedFieldIds.add(id);
+            renderOverlay();
+        }
+
+        function removeField(id) {
+            fields = fields.filter(f => f.id !== id);
+            selectedFieldIds.delete(id);
+            renderOverlay();
+        }
+
+        function autoOrderFields() {
+            // Sort by Y position (with a small threshold), then X position
+            fields.sort((a, b) => {
+                const yDiff = a.y - b.y;
+                // If within 10px vertically, consider them on the same "line" and sort by X
+                if (Math.abs(yDiff) < 10) {
+                    return a.x - b.x;
+                }
+                return yDiff;
+            });
+            renderOverlay();
+        }
+
+        function alignFields(mode) {
+            if (selectedFieldIds.size < 2) return; // Need 2+ to align
+
+            const selectedFields = fields.filter(f => selectedFieldIds.has(f.id));
+            
+            // Find reference value (usually from the first selected item, or 'active' item)
+            // Here we use the "top-most" or "left-most" as the anchor depending on mode
+            
+            if (mode === 'left') {
+                const minX = Math.min(...selectedFields.map(f => f.x));
+                selectedFields.forEach(f => f.x = minX);
+            } 
+            else if (mode === 'top') {
+                const minY = Math.min(...selectedFields.map(f => f.y));
+                selectedFields.forEach(f => f.y = minY);
+            }
+            else if (mode === 'centerV') {
+                // Align centers vertically
+                const first = selectedFields[0];
+                const centerX = first.x + (first.width / 2);
+                selectedFields.forEach(f => {
+                    f.x = centerX - (f.width / 2);
+                });
+            }
+            else if (mode === 'width') {
+                const firstW = selectedFields[0].width;
+                selectedFields.forEach(f => f.width = firstW);
+            }
+
+            renderOverlay();
+        }
+
+        // --- Rendering ---
+
+        function renderOverlay() {
+            overlay.innerHTML = '';
+            
+            fields.forEach((field, index) => {
+                const isSelected = selectedFieldIds.has(field.id);
+                
+                const el = document.createElement('div');
+                el.className = `draggable-field ${isSelected ? 'selected' : ''}`;
+                el.style.left = field.x + 'px';
+                el.style.top = field.y + 'px';
+                el.style.width = field.width + 'px';
+                el.style.height = field.height + 'px';
+
+                // Tab Order Badge (1-based index)
+                const badge = document.createElement('div');
+                badge.className = 'tab-badge';
+                badge.innerText = index + 1;
+                el.appendChild(badge);
+
+                // Delete Button
+                const delBtn = document.createElement('div');
+                delBtn.className = 'delete-btn';
+                delBtn.innerHTML = '✕';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeField(field.id);
+                };
+                el.appendChild(delBtn);
+
+                // Label
+                const text = document.createElement('span');
+                text.innerText = field.label;
+                text.style.pointerEvents = 'none';
+                el.appendChild(text);
+
+                // Rename on Double Click
+                el.ondblclick = (e) => {
+                    e.stopPropagation();
+                    const newName = prompt("Field Name:", field.label);
+                    if(newName) {
+                        field.label = newName;
+                        renderOverlay();
+                    }
+                };
+
+                // Mouse Down for Drag/Select
+                el.onmousedown = (e) => handleFieldMouseDown(e, field);
+
+                // Resize Handle (Text only)
+                if (field.type === 'text') {
+                    const handle = document.createElement('div');
+                    handle.className = 'resize-handle';
+                    handle.onmousedown = (e) => initResize(e, field);
+                    el.appendChild(handle);
+                }
+
+                overlay.appendChild(el);
+            });
+        }
+
+        // --- Interaction Logic ---
+
+        function handleBgClick(e) {
+            // Deselect all if clicking background
+            if (e.target.id === 'workspace' || e.target.id === 'overlay-layer') {
+                selectedFieldIds.clear();
+                renderOverlay();
+            }
+        }
+
+        function handleFieldMouseDown(e, field) {
+            // Ignore if clicking resize handle or delete
+            if (e.target.className.includes('resize-handle') || e.target.className.includes('delete-btn')) return;
+
+            e.stopPropagation(); // Don't trigger bg click
+
+            // Selection Logic
+            if (e.shiftKey) {
+                // Toggle selection
+                if (selectedFieldIds.has(field.id)) {
+                    selectedFieldIds.delete(field.id);
+                } else {
+                    selectedFieldIds.add(field.id);
+                }
+                renderOverlay();
+            } else {
+                // If clicking an unselected item without shift, select ONLY it
+                if (!selectedFieldIds.has(field.id)) {
+                    selectedFieldIds.clear();
+                    selectedFieldIds.add(field.id);
+                    renderOverlay();
+                }
+                // If clicking an ALREADY selected item, do nothing (preserve selection group for dragging)
+            }
+
+            initDrag(e);
+        }
+
+        // --- Dragging ---
+        let dragState = null;
+
+        function initDrag(e) {
+            // Prepare initial positions for ALL selected fields
+            const selectedFields = fields.filter(f => selectedFieldIds.has(f.id));
+            
+            dragState = {
+                startX: e.clientX,
+                startY: e.clientY,
+                initials: selectedFields.map(f => ({ id: f.id, x: f.x, y: f.y }))
+            };
+
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', stopDrag);
+        }
+
+        function onDrag(e) {
+            if (!dragState) return;
+
+            const dx = e.clientX - dragState.startX;
+            const dy = e.clientY - dragState.startY;
+
+            // Update all selected fields
+            dragState.initials.forEach(init => {
+                const field = fields.find(f => f.id === init.id);
+                if (field) {
+                    field.x = Math.max(0, init.x + dx);
+                    field.y = Math.max(0, init.y + dy);
+                }
+            });
+
+            // Use requestAnimationFrame for smoother DOM updates if needed, 
+            // but for simple boxes direct update is fine.
+            // We need to update DOM positions without full re-render for performance
+            dragState.initials.forEach(init => {
+                const field = fields.find(f => f.id === init.id);
+                // Find DOM element by finding field in fields array? 
+                // We re-renderOverlay on mouseup, but here we update style directly
+                // Actually finding the specific DOM element is tricky without IDs on elements
+                // Let's just do a quick dirty lookup since we rendered them in order
+            });
+            
+            // To keep it simple in this specific logic structure:
+            renderOverlay(); 
+        }
+
+        function stopDrag() {
+            dragState = null;
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+
+        // --- Resizing ---
+        let resizeState = null;
+
+        function initResize(e, field) {
+            e.stopPropagation();
+            resizeState = {
+                startX: e.clientX,
+                initialWidth: field.width,
+                field: field
+            };
+            document.addEventListener('mousemove', onResize);
+            document.addEventListener('mouseup', stopResize);
+        }
+
+        function onResize(e) {
+            if (!resizeState) return;
+            const dx = e.clientX - resizeState.startX;
+            const newW = Math.max(20, resizeState.initialWidth + dx);
+            
+            resizeState.field.width = newW;
+            renderOverlay();
+        }
+
+        function stopResize() {
+            resizeState = null;
+            document.removeEventListener('mousemove', onResize);
+            document.removeEventListener('mouseup', stopResize);
+        }
+
+
+        // --- PDF Generation ---
+
+        function downloadPDF() {
+            if (!pdfDoc) return;
+            const { jsPDF } = window.jspdf;
+            
+            // Create PDF matching original dimensions
+            const doc = new jsPDF({
+                orientation: originalPageWidth > originalPageHeight ? 'landscape' : 'portrait',
+                unit: 'pt',
+                format: [originalPageWidth, originalPageHeight]
+            });
+
+            // Add Background
+            const bgData = canvas.toDataURL('image/jpeg', 0.8);
+            doc.addImage(bgData, 'JPEG', 0, 0, originalPageWidth, originalPageHeight);
+
+            // Add Fields in array order (which determines Tab Order)
+            const conversionScale = 1 / scale; 
+
+            fields.forEach((field, index) => {
+                const pdfX = field.x * conversionScale;
+                const pdfY = field.y * conversionScale;
+                const pdfW = field.width * conversionScale;
+                const pdfH = field.height * conversionScale;
+                
+                // Use label as name if unique, otherwise append ID
+                const safeName = field.label.replace(/[^a-zA-Z0-9]/g, '_') + '_' + field.id;
+
+                if (field.type === 'text') {
+                    const textField = new doc.AcroFormTextField();
+                    textField.Rect = [pdfX, pdfY, pdfW, pdfH];
+                    textField.fieldName = safeName;
+                    textField.value = '';
+                    doc.addField(textField);
+                } 
+                else if (field.type === 'checkbox') {
+                    const checkBox = new doc.AcroFormCheckBox();
+                    checkBox.Rect = [pdfX, pdfY, pdfW, pdfH];
+                    checkBox.fieldName = safeName;
+                    checkBox.appearanceState = 'Off';
+                    doc.addField(checkBox);
+                }
+            });
+
+            // Get filename
+            let name = document.getElementById('filename').value || "document";
+            if (!name.endsWith('.pdf')) name += ".pdf";
+            
+            doc.save(name);
+        }
+    </script>
+</body>
+</html>
